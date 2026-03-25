@@ -373,6 +373,9 @@ By using a hybrid architecture, it achieves:
 - Usability (interactive graph UI)
 
 ---
+Live Demo
+
+A public live working demo link is not provided in this Readme file due to LLM API rate limits and usage constraints.
 
 👤 Author
 
