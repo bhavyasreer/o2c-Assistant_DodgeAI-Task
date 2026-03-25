@@ -1,181 +1,379 @@
-# O2C AI — Order-to-Cash Data Explorer
+🚀 O2C AI — Graph-Based Order-to-Cash Intelligence System
 
-This project provides a web UI to explore an SAP Order-to-Cash (O2C) dataset as a graph and ask natural-language questions. The backend converts questions to SQL, runs them against a local SQLite database, and (optionally) uses an LLM to turn the results into a concise answer.
+📌 Overview
 
----
+The Graph-Based Order-to-Cash (O2C) Intelligence System is a full-stack application that enables users to explore business transaction data using natural language queries and interactive graph visualization.
 
-## Live demo
+The system converts user questions into SQL queries, executes them on a structured O2C dataset, and returns data-grounded answers. It also provides a graph-based interface to visualize relationships between entities such as customers, orders, deliveries, billing documents, and payments.
 
-When deployed (example instructions below), the app is available at `/` (React UI) and exposes these API endpoints:
-
-- `POST /api/chat`
-- `GET  /api/graph`
-- `GET  /api/graph/expand/{node_id}`
-- `GET  /api/graph/node/{node_id}`
-- `GET  /api/examples`
+Additionally, the system supports multi-turn conversational queries, allowing users to ask contextual follow-up questions.
 
 ---
 
-## Architecture overview
+✨ Key Features
 
-### Frontend
-
-- React + Vite
-- Graph visualization: `reactflow`
-- Chat UI: calls `POST /api/chat` and highlights entity IDs mentioned in responses
-
-The frontend is served by the FastAPI backend from the built `frontend/dist` output (so production is a single deployable service).
-
-### Backend
-
-- FastAPI (`app/main.py`)
-- SQLite database shipped with the repo: `data.db`
-- REST API under `/api/*`
+- Natural language → SQL using LLM
+- Graph-based data exploration (interactive UI)
+- Conversational memory (multi-turn queries)
+- Deterministic fallback for ID-based queries
+- Hybrid AI + rule-based architecture
+- Real-time query execution on structured data
+- Guardrails for safe and accurate responses
 
 ---
 
-## Database choice
+🏗️ Architecture
 
-The app uses **SQLite** because:
+Frontend
 
-- It is a single-file database (`data.db`), which is ideal for demo and deployment.
-- The user queries are naturally expressed as SQL over a relational schema.
-- FastAPI can open short-lived connections per request without a separate DB service.
+- React (Vite)
+- React Flow for graph visualization
+- Chat UI for natural language interaction
 
-The shipped database includes an analytical view (`v_order_to_cash`) plus normalized tables for customers, products, orders, deliveries, billing, payments, and journal entries.
+Backend
+
+- FastAPI (Python)
+- Handles query processing, SQL execution, LLM integration, and graph APIs
+
+Database
+
+- SQLite ("data.db")
+- Contains normalized tables + analytical view ("v_order_to_cash")
+
+LLM
+
+- Groq API (LLaMA 3.3)
+
+---
+🔄 Request Flow
+
+User → Frontend (Chat UI)
+      ↓
+Backend (FastAPI)
+      ↓
+[Decision Layer]
+   → ID-based query → Direct SQL → DB
+   → Analytical query → LLM → SQL → DB
+      ↓
+Result Processing
+      ↓
+LLM (Natural language response)
+      ↓
+Frontend (Chat + Graph highlight)
 
 ---
 
-## LLM prompting strategy (two-step)
+🧠 System Design Decisions
 
-When `GROQ_API_KEY` is set, `POST /api/chat` uses a **two-stage** approach and responses are generated in natural language by the LLM.
+1. Hybrid Query System (LLM + Deterministic SQL)
 
-1. **Natural language → SQL**
-   - Prompt: `_SQL_PROMPT_TEMPLATE`
-   - Includes:
-     - a compact schema description (tables + join rules + dataset notes)
-     - strict formatting requirements:
-       - return ONLY SQL
-       - no markdown code fences
-       - output MUST start with `SELECT`
-       - use SQLite syntax
-       - prefer the `v_order_to_cash` view for exploration
+Problem
 
-2. **SQL results → natural language answer**
-   - Prompt: `_NARRATION_PROMPT_TEMPLATE`
-   - Inputs:
-     - the user question
-     - the executed SQL
-     - the returned rows (as text)
-   - Output rules:
-     - be concise
-     - do NOT hallucinate: only use the rows provided
-     - do NOT mention SQL/table internals
-     - currency formatting: dataset is INR; write `INR <amount>`
-
-LLM settings:
-
-- model: `llama-3.3-70b-versatile` (via Groq)
-- `temperature=0` for more deterministic SQL generation
+- LLMs introduce latency and may hallucinate incorrect SQL
+- Not all queries require AI-based reasoning
 
 ---
 
-## Guardrails & safety
+✅ Solution: Hybrid Query Optimization
 
-This project uses multiple layers to reduce failure modes and prevent unsafe outputs:
+The system dynamically selects execution strategy:
 
-### Domain guardrail (blocking unrelated prompts)
+🔹 Deterministic Path (ID-based queries)
 
-- `_is_domain_question()` rejects questions that do not look like they relate to the O2C dataset domain.
+When queries include entity IDs (billing/order/delivery):
 
-### SQL guardrails (LLM output hardening)
-
-- `_extract_sql()` attempts to extract a `SELECT ...` statement from model output.
-- `_sanitize_sql()` further enforces:
-  - only a single statement (keeps text before the first `;`)
-  - the SQL must start with `SELECT`
-  - common write/DCL keywords are rejected (`insert|update|delete|drop|alter|create|...`)
-
-### Natural-language output hardening
-
-- `_sanitize_natural_language_answer()`:
-  - removes code fences
-  - converts accidental `$123` to `INR 123`
-  - rejects outputs that look like SQL
-
-### Deterministic fallback for “no LLM” demos
-If `GROQ_API_KEY` is **not** set:
-- numeric entity-ID questions still work via deterministic DB lookups (`_lookup_ids_direct`)
-- common “example” analytics questions use a limited rule-based SQL fallback (`_rule_based_answer`)
-
-When `GROQ_API_KEY` is set, the deterministic shortcut for ID-queries is disabled so the LLM is responsible for the final natural-language phrasing.
+- Direct SQL lookup is executed
+- LLM is used only for formatting the final response
 
 ---
 
-## Local setup
+🔹 LLM Path (Analytical queries)
 
-### Backend
+For flexible queries:
 
-1. (Optional) create and activate a virtual env
-2. Install dependencies:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-3. Start the server:
-
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-4. (Optional) enable LLM:
-
-```bash
-export GROQ_API_KEY="..."
-```
-
-### Frontend build
-
-```bash
-cd frontend
-npm install
-npm run build
-```
-
-In production, the backend serves the built frontend automatically.
+- LLM generates SQL
+- SQL is executed
+- Results are converted to natural language
 
 ---
 
-## Docker / production deployment
+🔁 Execution Flow
 
-### Build image
-
-```bash
-docker build -t o2c-ai .
-```
-
-### Run image
-
-```bash
-docker run -p 8000:8000 \
-  -e GROQ_API_KEY="..." \
-  o2c-ai
-```
-
-Then open:
-
-- `http://localhost:8000/`
+User Query
+   ↓
+Decision Layer
+   → ID detected → SQL → DB → LLM (formatting)
+   → Else → LLM → SQL → DB → LLM (answer)
 
 ---
 
-## Creating the submission demo link (Render example)
+🎯 Why this approach?
 
-1. Push this repo to a **public GitHub** repository.
-2. In Render: create a **Web Service** → choose **Docker**.
-3. Set the Dockerfile path to `Dockerfile` (repo root).
-4. Add environment variable `GROQ_API_KEY` if you want full LLM chat.
-5. After deployment, the service URL is your public demo link.
+- Faster responses
+- Reduced LLM usage (cost-efficient)
+- Higher accuracy for critical queries
+- Better separation of concerns
 
-Health check suggestion (optional): `GET /api/examples`
+---
 
+2. Conversational Memory
+
+Why
+
+Users ask follow-up queries naturally.
+
+Example
+
+"Show billing 90678702"
+"What about its journal entries?"
+
+Design
+
+- Context from previous queries is stored
+- References like “its” are resolved
+
+---
+
+3. Graph-Based Representation
+
+O2C is inherently relational:
+
+Customer → Order → Delivery → Billing → Payment
+
+Benefits
+
+- Better understanding of relationships
+- Interactive exploration
+- Complements tabular results
+
+---
+
+4. Progressive Graph Expansion
+
+Problem
+
+Full graph → cluttered and unreadable
+
+Solution
+
+- Start with minimal nodes (customers)
+- Expand dynamically on user interaction
+
+---
+
+5. Technology Choices
+
+FastAPI
+
+- High performance
+- Easy API development
+- Python ecosystem compatibility
+
+React + Vite
+
+- Fast UI development
+- Component-based architecture
+
+---
+
+Trade-offs
+
+Decision| Trade-off
+SQLite| Simplicity vs scalability
+LLM usage| Flexibility vs reliability
+Graph UI| Usability vs complexity
+
+---
+
+🤖 LLM Prompting Strategy
+
+Two-Stage Prompting
+
+1. Natural Language → SQL
+
+- Prompt includes:
+  - schema description
+  - table relationships
+- Constraints:
+  - output must be SQL only
+  - must start with SELECT
+  - no markdown formatting
+
+---
+
+2. SQL Result → Natural Language
+
+- Input:
+  - user question
+  - SQL query
+  - result rows
+- Output:
+  - concise
+  - data-grounded
+  - no hallucination
+
+---
+
+Hallucination Control
+
+- temperature = 0
+- schema-aware prompting
+- SQL validation before execution
+
+---
+
+Failure Handling
+
+- fallback SQL rules
+- controlled error responses
+
+---
+
+🛡️ Guardrails & Reliability
+
+- Domain restriction for queries
+- Only SELECT queries allowed
+- Blocks write operations (INSERT, UPDATE, DELETE, etc.)
+- Output sanitization (removes SQL/code)
+- Deterministic fallback for ID queries
+- Graceful error handling
+
+---
+
+🗄️ Database Design
+
+Why SQLite?
+
+- Lightweight and portable
+- No external dependency
+- Easy deployment
+
+---
+
+Core Tables
+
+- customers
+- products
+- orders
+- order_items
+- deliveries
+- billing
+- payments
+- journal_entries
+
+---
+
+Analytical View
+
+"v_order_to_cash"
+
+Combines:
+
+orders + items + deliveries + billing + payments
+
+Purpose
+
+- Simplifies queries
+- Reduces LLM complexity
+- Ensures consistent joins
+
+---
+
+Relationships
+
+Customer → Orders  
+Orders → Items → Products  
+Orders → Deliveries  
+Deliveries → Billing  
+Billing → Payments  
+Billing → Journal Entries  
+
+---
+
+⚙️ Tech Stack
+
+Backend
+
+- FastAPI (Python)
+- Uvicorn
+
+Frontend
+
+- React (Vite)
+- React Flow
+
+Database
+
+- SQLite
+
+LLM
+
+- Groq API (LLaMA 3.3)
+
+Deployment
+
+- Docker
+- Render
+
+---
+
+🚀 Deployment
+
+The application is containerized using Docker and deployed on Render.
+
+Steps
+
+- Build Docker image
+- Deploy as Render Web Service
+- Set environment variable:
+  - "GROQ_API_KEY"
+
+---
+
+💬 Example Queries
+
+- Show billing 90678702
+- What about its journal entries?
+- Top products by quantity
+- Customers with highest revenue
+- Which invoices are unpaid?
+- Trace full flow for billing document 91150216
+
+---
+
+⚠️ Challenges & Solutions
+
+1. LLM Hallucination
+
+- Solved using hybrid system + guardrails
+
+2. SQL Accuracy
+
+- Solved using schema-aware prompting
+
+3. Conversational Context
+
+- Solved using memory tracking
+
+4. Graph Complexity
+
+- Solved using progressive expansion
+
+
+📌 Conclusion
+
+This system demonstrates a practical combination of:
+
+Relational Databases + LLMs + Graph Visualization
+
+By using a hybrid architecture, it achieves:
+
+- High accuracy (SQL-based retrieval)
+- Flexibility (LLM-powered queries)
+- Usability (interactive graph UI)
+
+---
+
+👤 Author
+
+Bhavya Sree
